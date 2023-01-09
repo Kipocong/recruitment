@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\PasswordResetJob;
 use App\Jobs\VerifyUserJobs;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Tymon\JWTAuth\Facades\JWTAuth as FacadesJWTAuth;
@@ -21,7 +24,7 @@ class AuthController extends Controller
      */
     public function __construct()
     {
-        $this->middleware('auth:api', ['except' => ['login', 'register', 'AccVerify']]);
+        $this->middleware('auth:api', ['except' => ['login', 'register', 'AccVerify', 'forgotPassword']]);
     }
     /**
      * Get a JWT via given credentials.
@@ -133,5 +136,28 @@ class AuthController extends Controller
             'expires_in' => FacadesJWTAuth::factory()->getTTL() * 60,
             'user' => auth()->user()
         ]);
+    }
+
+    public function forgotPassword(Request $request)
+    {
+        $user = User::where('email', $request->email)->first();
+        try {
+            if ($user) {
+                $token = Str::random(15);
+                $details = ['name' => $user->name, 'token' => $token, 'email' => $user->email, 'hashEmail' => Crypt::encryptString($user->email)];
+                if (dispatch(new PasswordResetJob($details))) {
+                    DB::table('password_resets')->insert([
+                        'email' => $user->email,
+                        'token' => $token,
+                        'created_at' => now()
+                    ]);
+                    return response()->json(['status' => true, 'message' => 'Password Reset link has been sent to your email']);
+                }
+            } else {
+                return response()->json(['status' => false, 'message' => 'Invalid Email address']);
+            }
+        } catch (\Throwable $th) {
+            return response()->json(['status' => false, 'message' => $th->getMessage()]);
+        }
     }
 }
